@@ -1,6 +1,6 @@
 # ============================================================
-#   XO Game - vs AI using Search Algorithms
-#   Algorithms: BFS / UCS / DFS
+#   XO Game - vs AI using BFS Search Algorithm
+#   Difficulty: EASY / MEDIUM / HARD
 #   pip install pygame
 # ============================================================
 
@@ -9,7 +9,6 @@ import sys
 import random
 import math
 from collections import deque
-import heapq
 from enum import Enum, auto
 from typing import Optional, List, Tuple
 
@@ -21,7 +20,7 @@ CELL_SIZE    = WINDOW_SIZE // GRID_SIZE
 LINE_WIDTH   = 6
 PIECE_WIDTH  = 10
 RADIUS       = CELL_SIZE // 3
-AI_THINK_MS  = 600
+AI_THINK_MS  = 500
 
 BG_COLOR     = ( 15,  15,  20)
 LINE_COLOR   = ( 50,  50,  65)
@@ -33,15 +32,15 @@ MUTED_COLOR  = (127, 140, 141)
 PANEL_COLOR  = ( 25,  25,  35)
 BTN_COLOR    = ( 44,  62,  80)
 BTN_HOVER    = ( 52,  73,  94)
-BFS_COLOR    = ( 39, 174,  96)   # أخضر
-UCS_COLOR    = (230, 126,  34)   # برتقالي
-DFS_COLOR    = (192,  57,  43)   # أحمر
+EASY_COLOR   = ( 39, 174,  96)
+MED_COLOR    = (230, 126,  34)
+HARD_COLOR   = (192,  57,  43)
 
 
-class Algorithm(Enum):
-    BFS = auto()
-    UCS = auto()
-    DFS = auto()
+class Difficulty(Enum):
+    EASY   = auto()
+    MEDIUM = auto()
+    HARD   = auto()
 
 
 class GameState(Enum):
@@ -117,71 +116,78 @@ class Board:
                    for r in range(3) for c in range(3))
 
     def to_tuple(self) -> tuple:
-        """تحويل اللوحة لـ tuple عشان نقدر نحطها في set (للـ visited)."""
         return tuple(self.cells[r][c] for r in range(3) for c in range(3))
 
     def evaluate(self) -> int:
         """
-        دالة تقييم بسيطة للحالة الحالية للوحة.
-        بترجع:
-          +10  لو AI فايز
-          -10  لو HUMAN فايز
-           0   تعادل أو ما انتهتش
-        مع bonus للمركز والزوايا عشان تحسن الاختيار.
+        تقييم جودة الحالة للـ AI:
+          +10  فوز AI
+          -10  فوز HUMAN
+          +3   AI في المركز
+          +1   AI في الزاوية
         """
         winner = self.check_winner()
         if winner == self.AI:    return 10
         if winner == self.HUMAN: return -10
 
         score = 0
-        # المركز مهم
         if self.cells[1][1] == self.AI:    score += 3
         if self.cells[1][1] == self.HUMAN: score -= 3
-        # الزوايا
-        corners = [(0,0),(0,2),(2,0),(2,2)]
-        for r, c in corners:
+        for r, c in [(0,0),(0,2),(2,0),(2,2)]:
             if self.cells[r][c] == self.AI:    score += 1
             if self.cells[r][c] == self.HUMAN: score -= 1
         return score
 
 
-# ── Search Algorithms ─────────────────────────────────────────
+# ── AI using BFS ──────────────────────────────────────────────
 #
-#  كل خوارزمية بتاخد اللوحة الحالية وبترجع أحسن حركة للـ AI
+#  BFS (Breadth-First Search):
+#  بيبحث في شجرة الحالات طبقة طبقة (level by level).
+#  بيلاقي أسرع طريق للفوز لأنه بيستكشف الحركات القريبة الأول.
 #
-#  State = (board_tuple, move_that_led_here, depth, whose_turn)
+#  التحكم في الصعوبة:
+#  - EASY:   عشوائي 100%  (BFS معطّل)
+#  - MEDIUM: 50% BFS + 50% عشوائي  (بيغلط أحياناً)
+#  - HARD:   BFS كامل  (يبحث عن أفضل حركة دايماً)
 #
 # ─────────────────────────────────────────────────────────────
 
-class SearchAI:
-    def __init__(self, algorithm: Algorithm):
-        self.algorithm = algorithm
+class AI:
+    def __init__(self, difficulty: Difficulty):
+        self.difficulty = difficulty
 
     def get_move(self, board: Board) -> Tuple[int, int]:
         empty = board.get_empty_cells()
         if not empty:
             return (-1, -1)
 
-        if self.algorithm == Algorithm.BFS:
-            return self._bfs(board)
-        elif self.algorithm == Algorithm.UCS:
-            return self._ucs(board)
-        else:
-            return self._dfs(board)
+        # EASY: عشوائي بالكامل
+        if self.difficulty == Difficulty.EASY:
+            return random.choice(empty)
 
-    # ── BFS ──────────────────────────────────────────────────
-    # بيستكشف كل الحالات مستوى مستوى (layer by layer).
-    # بيختار الحركة اللي تودي لأسرع فوز أو تمنع أسرع خسارة.
+        # MEDIUM: نص الوقت عشوائي ونص BFS
+        if self.difficulty == Difficulty.MEDIUM:
+            if random.random() < 0.5:
+                return random.choice(empty)
+
+        # HARD (وأحياناً MEDIUM): BFS كامل
+        return self._bfs(board)
+
     def _bfs(self, board: Board) -> Tuple[int, int]:
         """
-        Queue: (board_tuple, first_move, current_player)
-        بنحتفظ بـ first_move عشان نعرف أول حركة اتخدت من الجذر.
-        """
-        best_move   = board.get_empty_cells()[0]
-        best_score  = -math.inf
-        visited     = set()
+        BFS على شجرة حالات اللعبة.
 
-        # كل عنصر: (لوحة كـ tuple, أول حركة, اللاعب الحالي, عمق)
+        كل Node في الشجرة = حالة اللوحة بعد تسلسل من الحركات.
+        Queue بتحتفظ بـ: (اللوحة الحالية، أول حركة من الجذر، اللاعب الحالي، العمق)
+
+        بنحتفظ بـ first_move عشان في الأخر نعرف
+        أي حركة من الجذر أدّت لأفضل نتيجة.
+        """
+        best_move  = board.get_empty_cells()[0]
+        best_score = -math.inf
+        visited    = set()
+
+        # نبدأ بتوليد كل الحركات الممكنة للـ AI من الوضع الحالي
         queue = deque()
         for (r, c) in board.get_empty_cells():
             new_board = board.clone()
@@ -197,109 +203,22 @@ class SearchAI:
             visited.add(state_key)
 
             winner = cur_board.check_winner()
+
+            # حالة نهائية: قيّم وقارن
             if winner or cur_board.is_full():
-                score = cur_board.evaluate() - depth  # أسرع فوز أفضل
+                # نطرح العمق عشان نُفضّل الفوز الأسرع
+                score = cur_board.evaluate() - depth
                 if score > best_score:
                     best_score = score
                     best_move  = first_move
                 continue
 
-            # توليد الحالات التالية
+            # توليد الحالات التالية (دور الخصم)
             next_player = Board.HUMAN if player == Board.AI else Board.AI
             for (r, c) in cur_board.get_empty_cells():
                 nb = cur_board.clone()
                 nb.make_move(r, c, player)
                 queue.append((nb, first_move, next_player, depth + 1))
-
-        return best_move
-
-    # ── UCS ──────────────────────────────────────────────────
-    # Uniform-Cost Search: بيعطي كل حركة تكلفة وبيختار المسار الأقل تكلفة.
-    # التكلفة هنا = عمق الحركة (depth) + عقوبة على الحالات السيئة.
-    def _ucs(self, board: Board) -> Tuple[int, int]:
-        """
-        Priority Queue: (cost, counter, board_tuple, first_move, player)
-        التكلفة = depth - evaluate()  (بنحول maximize لـ minimize)
-        """
-        best_move  = board.get_empty_cells()[0]
-        best_score = -math.inf
-        visited    = set()
-        counter    = 0  # عشان nbreak ties في الـ heap
-
-        heap = []
-        for (r, c) in board.get_empty_cells():
-            new_board = board.clone()
-            new_board.make_move(r, c, Board.AI)
-            cost = 1 - new_board.evaluate()  # تكلفة = عمق - تقييم
-            heapq.heappush(heap, (cost, counter, new_board, (r, c), Board.HUMAN, 1))
-            counter += 1
-
-        while heap:
-            cost, _, cur_board, first_move, player, depth = heapq.heappop(heap)
-            state_key = (cur_board.to_tuple(), player)
-
-            if state_key in visited:
-                continue
-            visited.add(state_key)
-
-            winner = cur_board.check_winner()
-            if winner or cur_board.is_full():
-                score = cur_board.evaluate()
-                if score > best_score:
-                    best_score = score
-                    best_move  = first_move
-                continue
-
-            next_player = Board.HUMAN if player == Board.AI else Board.AI
-            for (r, c) in cur_board.get_empty_cells():
-                nb = cur_board.clone()
-                nb.make_move(r, c, player)
-                new_cost = depth + 1 - nb.evaluate()
-                heapq.heappush(heap, (new_cost, counter, nb, first_move,
-                                      next_player, depth + 1))
-                counter += 1
-
-        return best_move
-
-    # ── DFS ──────────────────────────────────────────────────
-    # Depth-First Search: بيغوص لأعمق نقطة أول قبل ما يرجع.
-    # بيستخدم Stack وبيقيّم الحالات النهائية ويختار أحسنها.
-    def _dfs(self, board: Board) -> Tuple[int, int]:
-        """
-        Stack: (board, first_move, player, depth)
-        بيغوص لـ depth=9 (كل الحالات) وبيختار أحسن تقييم.
-        """
-        best_move  = board.get_empty_cells()[0]
-        best_score = -math.inf
-        visited    = set()
-
-        stack = []
-        for (r, c) in board.get_empty_cells():
-            new_board = board.clone()
-            new_board.make_move(r, c, Board.AI)
-            stack.append((new_board, (r, c), Board.HUMAN, 1))
-
-        while stack:
-            cur_board, first_move, player, depth = stack.pop()  # LIFO
-            state_key = (cur_board.to_tuple(), player)
-
-            if state_key in visited:
-                continue
-            visited.add(state_key)
-
-            winner = cur_board.check_winner()
-            if winner or cur_board.is_full() or depth >= 9:
-                score = cur_board.evaluate()
-                if score > best_score:
-                    best_score = score
-                    best_move  = first_move
-                continue
-
-            next_player = Board.HUMAN if player == Board.AI else Board.AI
-            for (r, c) in cur_board.get_empty_cells():
-                nb = cur_board.clone()
-                nb.make_move(r, c, player)
-                stack.append((nb, first_move, next_player, depth + 1))
 
         return best_move
 
@@ -312,9 +231,9 @@ class Renderer:
     def __init__(self, screen: pygame.Surface):
         self.screen  = screen
         self.font_xl = pygame.font.SysFont("Arial", 52, bold=True)
-        self.font_lg = pygame.font.SysFont("Arial", 28, bold=True)
-        self.font_md = pygame.font.SysFont("Arial", 21)
-        self.font_sm = pygame.font.SysFont("Arial", 16)
+        self.font_lg = pygame.font.SysFont("Arial", 30, bold=True)
+        self.font_md = pygame.font.SysFont("Arial", 22)
+        self.font_sm = pygame.font.SysFont("Arial", 17)
 
     def _cx(self, surf: pygame.Surface) -> int:
         return (WINDOW_SIZE - surf.get_width()) // 2
@@ -327,40 +246,40 @@ class Renderer:
         title = self.font_xl.render("X  O", True, TEXT_COLOR)
         self.screen.blit(title, (self._cx(title), 40))
 
-        sub = self.font_md.render("Choose a Search Algorithm for the AI", True, MUTED_COLOR)
-        self.screen.blit(sub, (self._cx(sub), 108))
+        sub = self.font_md.render("Play Against AI  (BFS Algorithm)", True, MUTED_COLOR)
+        self.screen.blit(sub, (self._cx(sub), 112))
 
-        algos = [
-            ("BFS  -  Breadth-First Search", "bfs", BFS_COLOR, 185),
-            ("UCS  -  Uniform-Cost Search",  "ucs", UCS_COLOR, 275),
-            ("DFS  -  Depth-First Search",   "dfs", DFS_COLOR, 365),
+        levels = [
+            ("EASY",   "easy",   EASY_COLOR, 195),
+            ("MEDIUM", "medium", MED_COLOR,  285),
+            ("HARD",   "hard",   HARD_COLOR, 375),
         ]
-        for label, key, color, y in algos:
-            rect = pygame.Rect(WINDOW_SIZE//2 - 185, y, 370, 60)
+        for label, key, color, y in levels:
+            rect = pygame.Rect(WINDOW_SIZE//2 - 130, y, 260, 60)
             hover = hovered == key
             pygame.draw.rect(self.screen, BTN_HOVER if hover else BTN_COLOR,
                              rect, border_radius=12)
             pygame.draw.rect(self.screen, color, rect, width=3, border_radius=12)
-            txt = self.font_md.render(label, True, color)
+            txt = self.font_lg.render(label, True, color)
             self.screen.blit(txt, (rect.centerx - txt.get_width()//2,
                                    rect.centery - txt.get_height()//2))
 
-        hint = self.font_sm.render("You are X   |   AI is O", True, MUTED_COLOR)
-        self.screen.blit(hint, (self._cx(hint), 460))
+        hint = self.font_sm.render("Choose difficulty to start", True, MUTED_COLOR)
+        self.screen.blit(hint, (self._cx(hint), 462))
 
-        hint2 = self.font_sm.render("Click an algorithm to start", True, MUTED_COLOR)
+        hint2 = self.font_sm.render("You are X   |   AI is O", True, MUTED_COLOR)
         self.screen.blit(hint2, (self._cx(hint2), 484))
 
     def get_menu_btn(self, pos) -> Optional[str]:
-        for key, y in [("bfs", 185), ("ucs", 275), ("dfs", 365)]:
-            if pygame.Rect(WINDOW_SIZE//2 - 185, y, 370, 60).collidepoint(pos):
+        for key, y in [("easy", 195), ("medium", 285), ("hard", 375)]:
+            if pygame.Rect(WINDOW_SIZE//2 - 130, y, 260, 60).collidepoint(pos):
                 return key
         return None
 
     # ── Game ─────────────────────────────────────────────────
 
     def draw_game(self, board: Board, state: GameState,
-                  winner: Optional[int], algo: Algorithm,
+                  winner: Optional[int], difficulty: Difficulty,
                   score: dict, thinking: bool):
 
         self.screen.fill(BG_COLOR, (0, 0, WINDOW_SIZE, WINDOW_SIZE))
@@ -378,7 +297,7 @@ class Renderer:
                 pygame.draw.line(self.screen, WIN_COLOR,
                                  line[0], line[1], LINE_WIDTH + 4)
 
-        self._draw_panel(algo, score, state, winner, thinking)
+        self._draw_panel(difficulty, score, state, winner, thinking)
 
     def _draw_grid(self):
         for i in range(1, GRID_SIZE):
@@ -403,38 +322,37 @@ class Renderer:
                     pygame.draw.circle(self.screen, O_COLOR,
                                        (cx, cy), RADIUS, PIECE_WIDTH)
 
-    def _draw_panel(self, algo: Algorithm, score: dict,
+    def _draw_panel(self, difficulty: Difficulty, score: dict,
                     state: GameState, winner: Optional[int], thinking: bool):
         Y = WINDOW_SIZE
 
-        algo_info = {
-            Algorithm.BFS: ("BFS", BFS_COLOR),
-            Algorithm.UCS: ("UCS", UCS_COLOR),
-            Algorithm.DFS: ("DFS", DFS_COLOR),
+        diff_info = {
+            Difficulty.EASY:   ("EASY",   EASY_COLOR),
+            Difficulty.MEDIUM: ("MEDIUM", MED_COLOR),
+            Difficulty.HARD:   ("HARD",   HARD_COLOR),
         }
-        algo_name, algo_color = algo_info[algo]
+        diff_name, diff_color = diff_info[difficulty]
 
-        # Algorithm badge
-        badge = self.font_sm.render(f"AI Algorithm: {algo_name}", True, algo_color)
+        # Level + algorithm badge
+        badge = self.font_sm.render(f"Level: {diff_name}   |   AI: BFS", True, diff_color)
         self.screen.blit(badge, (20, Y + 14))
 
         # Score
         sc = self.font_sm.render(
             f"You: {score['human']}   Draw: {score['draw']}   AI: {score['ai']}",
             True, MUTED_COLOR)
-        self.screen.blit(sc, (20, Y + 35))
+        self.screen.blit(sc, (20, Y + 36))
 
         # Main message
         if thinking:
-            msg   = f"AI ({algo_name}) is searching...  [*]"
-            color = algo_color
+            msg, color = "AI (BFS) is thinking...  [*]", diff_color
         elif state == GameState.GAME_OVER:
             if winner == Board.HUMAN:
-                msg, color = "You Win!   \\(^o^)/", BFS_COLOR
+                msg, color = "You Win!   \\(^o^)/", EASY_COLOR
             elif winner == Board.AI:
-                msg, color = f"AI ({algo_name}) Wins!   (>_<)", DFS_COLOR
+                msg, color = "AI Wins!   (>_<)", HARD_COLOR
             else:
-                msg, color = "Draw!   (-_-)", UCS_COLOR
+                msg, color = "Draw!   (-_-)", MED_COLOR
         else:
             msg, color = "Your turn!  Click a cell.", TEXT_COLOR
 
@@ -446,8 +364,8 @@ class Renderer:
     def _draw_bottom_btns(self):
         mouse = pygame.mouse.get_pos()
         Y = WINDOW_SIZE
-        btn_r = pygame.Rect(WINDOW_SIZE//2 + 10,  Y + 108, 155, 36)
-        btn_m = pygame.Rect(WINDOW_SIZE//2 - 170, Y + 108, 155, 36)
+        btn_r = pygame.Rect(WINDOW_SIZE//2 + 10,  Y + 110, 155, 36)
+        btn_m = pygame.Rect(WINDOW_SIZE//2 - 170, Y + 110, 155, 36)
         for btn, label in [(btn_r, "New Game  [R]"), (btn_m, "[M]  Menu")]:
             hover = btn.collidepoint(mouse)
             pygame.draw.rect(self.screen, BTN_HOVER if hover else BTN_COLOR,
@@ -459,8 +377,8 @@ class Renderer:
 
     def get_game_btn(self, pos) -> Optional[str]:
         Y = WINDOW_SIZE
-        if pygame.Rect(WINDOW_SIZE//2 + 10,  Y + 108, 155, 36).collidepoint(pos): return "restart"
-        if pygame.Rect(WINDOW_SIZE//2 - 170, Y + 108, 155, 36).collidepoint(pos): return "menu"
+        if pygame.Rect(WINDOW_SIZE//2 + 10,  Y + 110, 155, 36).collidepoint(pos): return "restart"
+        if pygame.Rect(WINDOW_SIZE//2 - 170, Y + 110, 155, 36).collidepoint(pos): return "menu"
         return None
 
 
@@ -471,22 +389,22 @@ class XOGame:
 
     def __init__(self):
         pygame.init()
-        pygame.display.set_caption("XO  -  Search Algorithms AI")
+        pygame.display.set_caption("XO  -  BFS AI")
         self.screen    = pygame.display.set_mode((WINDOW_SIZE, WINDOW_SIZE + self.PANEL_H))
         self.clock     = pygame.time.Clock()
         self.renderer  = Renderer(self.screen)
         self.board     = Board()
-        self.ai        = SearchAI(Algorithm.BFS)
-        self.algorithm = Algorithm.BFS
+        self.ai        = AI(Difficulty.HARD)
+        self.difficulty     = Difficulty.HARD
         self.state     = GameState.MENU
         self.winner: Optional[int] = None
         self.score          = {"human": 0, "ai": 0, "draw": 0}
         self.ai_think_timer = 0
         self.hovered_btn: Optional[str] = None
 
-    def _start_game(self, algorithm: Algorithm):
-        self.algorithm = algorithm
-        self.ai        = SearchAI(algorithm)
+    def _start_game(self, difficulty: Difficulty):
+        self.difficulty = difficulty
+        self.ai = AI(difficulty)
         self.board.reset()
         self.winner = None
         self.state  = GameState.PLAYING
@@ -504,9 +422,9 @@ class XOGame:
                 pygame.quit(); sys.exit()
             if event.type == pygame.MOUSEBUTTONDOWN:
                 btn = self.renderer.get_menu_btn(event.pos)
-                if btn == "bfs": self._start_game(Algorithm.BFS)
-                elif btn == "ucs": self._start_game(Algorithm.UCS)
-                elif btn == "dfs": self._start_game(Algorithm.DFS)
+                if btn == "easy":   self._start_game(Difficulty.EASY)
+                elif btn == "medium": self._start_game(Difficulty.MEDIUM)
+                elif btn == "hard":   self._start_game(Difficulty.HARD)
 
     def _handle_game_events(self):
         for event in pygame.event.get():
@@ -565,7 +483,7 @@ class XOGame:
                 thinking = (self.state == GameState.AI_THINK)
                 self.renderer.draw_game(
                     self.board, self.state, self.winner,
-                    self.algorithm, self.score, thinking
+                    self.difficulty, self.score, thinking
                 )
             pygame.display.flip()
             self.clock.tick(60)
